@@ -1,0 +1,248 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Plantilla para crear una VPC con subredes públicas/privadas, NAT Gateway, VPC Peering, RDS MySQL y un Bucket S3 para carga de archivos"
+
+Parameters:
+  EnvironmentType:
+    Description: "Tipo de ambiente (Dev/Prod)"
+    Type: String
+    Default: Dev
+    AllowedValues: [Dev, Prod]
+    ConstraintDescription: "Debe ser Dev o Prod"
+
+  PublicSubnet1CIDR:
+    Description: "CIDR block para la subred pública 1"
+    Type: String
+    Default: 20.0.1.0/24
+
+  PublicSubnet2CIDR:
+    Description: "CIDR block para la subred pública 2"
+    Type: String
+    Default: 20.0.2.0/24
+
+  PrivateSubnet1CIDR:
+    Description: "CIDR block para la subred privada 1"
+    Type: String
+    Default: 20.0.3.0/24
+
+  PrivateSubnet2CIDR:
+    Description: "CIDR block para la subred privada 2"
+    Type: String
+    Default: 20.0.4.0/24
+
+  DBUsername:
+    Description: "Nombre de usuario para la base de datos RDS"
+    Type: String
+    NoEcho: true
+
+  DBPassword:
+    Description: "Contraseña para la base de datos RDS"
+    Type: String
+    NoEcho: true
+
+  PeerVPCId:
+    Description: "ID de la VPC destino para el peering"
+    Type: String
+    Default: ""
+
+  PeerVPCCidr:
+    Description: "CIDR block de la VPC destino para el peering"
+    Type: String
+    Default: "10.0.0.0/16"
+
+  BucketName:
+    Description: "Nombre del bucket S3"
+    Type: String
+
+  BucketAccessLevel:
+    Description: "Nivel de acceso del bucket"
+    Type: String
+    Default: Private
+    AllowedValues: [Private, Public]
+    ConstraintDescription: "Debe ser Private o Public"
+
+  StorageClass:
+    Description: "Clase de almacenamiento para los archivos"
+    Type: String
+    Default: Standard
+    AllowedValues: [Standard, Intelligent-Tiering]
+
+Mappings:
+  CIDRRanges:
+    Dev:
+      VPCCIDR: "20.0.0.0/16"
+    Prod:
+      VPCCIDR: "20.0.0.0/16"
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap [CIDRRanges, !Ref EnvironmentType, VPCCIDR]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-AlexVPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-AlexIGW
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnet1CIDR
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-AlexPublicSubnet1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnet2CIDR
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-AlexPublicSubnet2
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-AlexPrivateSubnet1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-AlexPrivateSubnet2
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security group para RDS MySQL"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: "3306"
+          ToPort: "3306"
+          CidrIp: !Ref PrivateSubnet1CIDR
+        - IpProtocol: tcp
+          FromPort: "3306"
+          ToPort: "3306"
+          CidrIp: !Ref PrivateSubnet2CIDR
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-AlexRDSSecurityGroup
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.t3.medium
+      DBInstanceIdentifier: !Sub ${AWS::StackName}-AlexRDS
+      Engine: MySQL
+      EngineVersion: "8.0"
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBName: "alexdatabase"
+      MultiAZ: true
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      BackupRetentionPeriod: 7
+      AllocatedStorage: 20
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-AlexRDS
+
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Subredes para RDS MySQL"
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-AlexRDSSubnetGroup
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:   
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false       
+        RestrictPublicBuckets: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-AlexS3Bucket
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: IsPublic
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:GetObject
+            Resource: !Sub arn:aws:s3:::${BucketName}/*
+
+Conditions:
+  IsPublic: !Equals [!Ref BucketAccessLevel, Public]
+
+Outputs:
+  RDSInstanceEndpoint:
+    Description: "Endpoint de la instancia RDS MySQL"
+    Value: !GetAtt RDSInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-AlexRDSInstanceEndpoint
+
+  VPCId:
+    Description: "ID de la VPC creada"
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${AWS::StackName}-AlexVPCId
+
+  S3BucketARN:
+    Description: "ARN del bucket S3"
+    Value: !GetAtt S3Bucket.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-AlexS3BucketARN
+
+  S3UploadURL:
+    Description: "URL base para cargar archivos al bucket"
+    Value: !Sub https://s3.amazonaws.com/${BucketName}/
+    Export:
+      Name: !Sub ${AWS::StackName}-AlexS3UploadURL

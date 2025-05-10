@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  AttachIGW:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: "tarea 4.2.2"
+
+Mappings:
+  RegionToCIDR:
+    us-east-1:
+      VpcCIDR: "10.0.0.0/20"
+      SubnetCIDR: "10.0.0.0/25"
+    us-west-1:
+      VpcCIDR: "172.16.0.0/20"
+      SubnetCIDR: "172.16.0.0/25"
+
+Conditions:
+  AttachIGWCondition: !Equals [!Ref AttachIGW, "true"]
+
+Resources:
+  VPCAlexEast:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: !FindInMap [RegionToCIDR, "us-east-1", VpcCIDR]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: "VPC-Alex-East"
+
+  VPCAlexWest:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: !FindInMap [RegionToCIDR, "us-west-1", VpcCIDR]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: "VPC-Alex-West"
+
+  PublicSubnetAlexEast:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPCAlexEast
+      CidrBlock: !FindInMap [RegionToCIDR, "us-east-1", SubnetCIDR]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: "Subnet-Alex-East"
+
+  PublicSubnetAlexWest:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPCAlexWest
+      CidrBlock: !FindInMap [RegionToCIDR, "us-west-1", SubnetCIDR]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: "Subnet-Alex-West"
+
+  InternetGatewayAlexEast:
+    Type: "AWS::EC2::InternetGateway"
+    Condition: AttachIGWCondition
+    Properties:
+      Tags:
+        - Key: Name
+          Value: "IGW-Alex-East"
+
+  InternetGatewayAlexWest:
+    Type: "AWS::EC2::InternetGateway"
+    Condition: AttachIGWCondition
+    Properties:
+      Tags:
+        - Key: Name
+          Value: "IGW-Alex-West"
+
+  IGWAttachmentAlexEast:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPCAlexEast
+      InternetGatewayId: !If [AttachIGWCondition, !Ref InternetGatewayAlexEast, !Ref "AWS::NoValue"]
+
+
+  IGWAttachmentAlexWest:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPCAlexWest
+      InternetGatewayId: !If [AttachIGWCondition, !Ref InternetGatewayAlexWest, !Ref "AWS::NoValue"]
+
