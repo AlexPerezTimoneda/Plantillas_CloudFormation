@@ -1,0 +1,148 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Desplegar una zona privada de Route 53 con un servidor web y un cliente Windows."
+
+Parameters:
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+  KeyPairName:
+    Type: String
+  WindowsAmiID:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-windows-latest/Windows_Server-2025-English-Full-Base
+  LinuxAmiID:
+    Type: String
+    Default: ami-0c4b8d05558aa0e8d
+  PrivateDomainName:
+    Type: String
+    Default: "marca.com"
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: "WebApp-VPC"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: "WebApp-IGW"
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Ref AvailabilityZone
+      MapPublicIpOnLaunch: true
+
+  SecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+          GroupDescription: "Permite HTTP, HTTPS, RDP y SSH"
+          VpcId: !Ref VPC
+          SecurityGroupIngress:
+            - IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+            - IpProtocol: tcp
+              FromPort: 443
+              ToPort: 443
+              CidrIp: 0.0.0.0/0
+            - IpProtocol: tcp
+              FromPort: 3389
+              ToPort: 3389
+              CidrIp: 0.0.0.0/0
+            - IpProtocol: tcp
+              FromPort: 22
+              ToPort: 22
+              CidrIp: 0.0.0.0/0
+    
+
+  PublicRouteTable:
+            Type: AWS::EC2::RouteTable
+            Properties:
+              VpcId: !Ref VPC
+              Tags:
+                - Key: Name
+                  Value: "PublicRouteTable"
+        
+  PublicRoute:
+            Type: AWS::EC2::Route
+            DependsOn: VPCGatewayAttachment
+            Properties:
+              RouteTableId: !Ref PublicRouteTable
+              DestinationCidrBlock: 0.0.0.0/0
+              GatewayId: !Ref InternetGateway
+        
+  PublicSubnetRouteTableAssociation:
+            Type: AWS::EC2::SubnetRouteTableAssociation
+            Properties:
+              SubnetId: !Ref PublicSubnet
+              RouteTableId: !Ref PublicRouteTable
+        
+
+  LinuxInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LinuxAmiID
+      InstanceType: t2.micro
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: "Linux-EC2"
+
+  WindowsInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref WindowsAmiID
+      InstanceType: c5.large
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: "WindowsServer"
+
+  PrivateHostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref PrivateDomainName
+      VPCs:
+        - VPCId: !Ref VPC
+          VPCRegion: !Ref AWS::Region
+
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PrivateHostedZone
+      Name: !Ref PrivateDomainName
+      Type: A
+      TTL: 60
+      ResourceRecords:
+        - !GetAtt LinuxInstance.PrivateIp
+
+Outputs:
+  WebServerPrivateDNS:
+    Description: "Private DNS name of the web server"
+    Value: !Ref PrivateDomainName
+  WindowsClientPublicIP:
+    Description: "Public IP of Windows Client"
+    Value: !GetAtt WindowsInstance.PublicIp
